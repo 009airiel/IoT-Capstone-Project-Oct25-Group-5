@@ -1,116 +1,154 @@
-from flask import Flask, render_template_string, request, session, redirect, url_for
-from datetime import datetime
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash
+import requests
+import json
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_key'
+app.secret_key = 'super_secret_key_for_session'
 
-# --- MOCK DATA ---
-USERS = {"admin": "password123", "user1": "securehome"}
-VALID_PIN = "123456"
+# --- CONFIGURATION ---
+MOBIUS_BASE = "http://localhost:7579/Mobius/SmartLock/data"
+MOBIUS_HEADERS_GET = {
+    'X-M2M-RI': '12345',
+    'X-M2M-Origin': 'S',
+    'Accept': 'application/json'
+}
 
-# This list will act as your "Database" for now
-# It stores dictionaries: {'time': '...', 'user': '...', 'status': '...'}
-audit_logs = []
+# --- FIXED HEADERS FOR UNLOCKING ---
+MOBIUS_HEADERS_POST = {
+    'X-M2M-RI': '12345',
+    'X-M2M-Origin': 'S',
+    'Content-Type': 'application/vnd.onem2m-res+json; ty=4' 
+}
 
-# --- HTML TEMPLATES ---
-LOGIN_PAGE = """
+USERS = { "admin": "password123", "user": "unikl2025" }
+SECURE_PIN = "123456"
+
+# --- HTML ---
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html>
+<head><title>Secure Home V - Login</title>
 <style>
-    body { font-family: sans-serif; max-width: 400px; margin: 50px auto; text-align: center; }
-    input { padding: 10px; margin: 5px; width: 100%; box-sizing: border-box;}
-    button { background-color: #007bff; color: white; padding: 10px; width: 100%; border: none; cursor: pointer;}
-    button:hover { background-color: #0056b3; }
+body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #eee; }
+.box { background: white; padding: 40px; border-radius: 10px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+input { padding: 10px; margin: 10px 0; width: 100%; box-sizing: border-box; }
+button { padding: 10px; background-color: #007bff; color: white; border: none; width: 100%; cursor: pointer; }
 </style>
-<h2>Secure Home V Login</h2>
-<form method="post">
-    <input type="text" name="username" placeholder="Username" required><br>
-    <input type="password" name="password" placeholder="Password" required><br>
-    <button type="submit">Login</button>
-</form>
-{% if error %} <p style="color:red">{{ error }}</p> {% endif %}
-"""
-
-DASHBOARD_PAGE = """
-<style>
-    body { font-family: sans-serif; max-width: 800px; margin: 20px auto; padding: 20px;}
-    .status-box { border: 2px solid #333; padding: 20px; text-align: center; margin-bottom: 20px; border-radius: 10px;}
-    .log-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    .log-table th, .log-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    .log-table th { background-color: #f2f2f2; }
-    .success { color: green; font-weight: bold; }
-    .failed { color: red; font-weight: bold; }
-</style>
-
-<div style="display:flex; justify-content:space-between; align-items:center;">
-    <h2>Welcome, {{ username }}</h2>
-    <a href="/logout" style="color:red; text-decoration:none;">Logout</a>
-</div>
-
-<div class="status-box">
-    <h3>Vault Control</h3>
-    <p>Current Status: <strong>LOCKED</strong></p>
-    
-    <form action="/unlock" method="post">
-        <label>Enter MFA PIN:</label>
-        <input type="text" name="pin" maxlength="6" style="width: 100px; text-align:center;" required>
-        <button type="submit" style="background-color: #28a745; color: white; padding: 10px 20px; border: none; cursor: pointer;">UNLOCK</button>
+</head>
+<body>
+<div class="box">
+    <h2>Secure Home V</h2>
+    {% if error %}<p style="color:red">{{ error }}</p>{% endif %}
+    <form method="POST">
+        <input type="text" name="username" placeholder="Username" required><br>
+        <input type="password" name="password" placeholder="Password" required><br>
+        <button type="submit">Login</button>
     </form>
-    {% if message %} <p style="color: blue;">{{ message }}</p> {% endif %}
 </div>
-
-<h3>Audit Logs (FR-05)</h3>
-<table class="log-table">
-    <tr>
-        <th>Timestamp</th>
-        <th>User</th>
-        <th>Action</th>
-        <th>Result</th>
-    </tr>
-    {% for log in logs|reverse %}
-    <tr>
-        <td>{{ log.time }}</td>
-        <td>{{ log.user }}</td>
-        <td>{{ log.action }}</td>
-        <td class="{{ 'success' if log.result == 'Success' else 'failed' }}">{{ log.result }}</td>
-    </tr>
-    {% endfor %}
-</table>
+</body>
+</html>
 """
 
-# --- ROUTES ---
+DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Secure Home V - Dashboard</title>
+    <meta http-equiv="refresh" content="60"> 
+    <style>
+        body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; padding-top: 50px; }
+        .status-box { background: white; padding: 40px; border-radius: 10px; display: inline-block; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .LOCKED { color: red; font-size: 24px; font-weight: bold; }
+        .UNLOCKED { color: green; font-size: 24px; font-weight: bold; }
+        
+        .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: white; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 300px; border-radius: 10px; }
+    </style>
+    <script>
+        function openPinModal() { document.getElementById('pinModal').style.display = 'block'; }
+        function closePinModal() { document.getElementById('pinModal').style.display = 'none'; }
+    </script>
+</head>
+<body>
+    <div class="status-box">
+        <h1>Smart Vault Status</h1>
+        <div class="{{ current_status }}">Current State: {{ current_status }}</div>
+        <p>Last Updated: {{ last_time }}</p>
+        
+        {% if current_status == 'LOCKED' %}
+            <button onclick="openPinModal()" style="background-color: green; color: white; padding: 15px 30px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer;">UNLOCK VAULT</button>
+        {% else %}
+             <button disabled style="background-color: grey; color: white; padding: 15px 30px; border: none; border-radius: 5px;">VAULT IS OPEN</button>
+        {% endif %}
+        <br><br><a href="/logout">Logout</a>
+    </div>
+
+    <div id="pinModal" class="modal">
+        <div class="modal-content">
+            <h3>Security Verification</h3>
+            <p>Enter 6-digit PIN to unlock:</p>
+            <form method="POST" action="/unlock">
+                <input type="password" name="pin" maxlength="6" style="padding: 10px; width: 80%; text-align: center; letter-spacing: 5px;" required>
+                <br><br>
+                <button type="submit" style="background-color: red; color: white; padding: 10px;">CONFIRM</button>
+                <button type="button" onclick="closePinModal()" style="padding: 10px;">Cancel</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
 @app.route('/', methods=['GET', 'POST'])
 def login():
-    error = None
     if request.method == 'POST':
-        user = request.form['username']
-        pw = request.form['password']
-        if user in USERS and USERS[user] == pw:
-            session['user'] = user
+        if request.form['username'] in USERS and USERS[request.form['username']] == request.form['password']:
+            session['user'] = request.form['username']
             return redirect(url_for('dashboard'))
-        error = "Invalid Username or Password"
-    return render_template_string(LOGIN_PAGE, error=error)
+        else:
+            return render_template_string(LOGIN_HTML, error='Invalid Credentials')
+    return render_template_string(LOGIN_HTML, error=None)
 
 @app.route('/dashboard')
 def dashboard():
     if 'user' not in session: return redirect(url_for('login'))
-    return render_template_string(DASHBOARD_PAGE, username=session['user'], logs=audit_logs)
+    
+    # READ FROM MOBIUS
+    try:
+        response = requests.get(MOBIUS_BASE + "/la", headers=MOBIUS_HEADERS_GET)
+        if response.status_code == 200:
+            data = response.json()
+            content = data['m2m:cin']['con']
+            ct = data['m2m:cin']['ct']
+            formatted_time = f"{ct[0:4]}-{ct[4:6]}-{ct[6:8]} {ct[9:11]}:{ct[11:13]}"
+        else:
+            content = "UNKNOWN"
+            formatted_time = "N/A"
+    except:
+        content = "CONNECTION ERROR"
+        formatted_time = "N/A"
+
+    return render_template_string(DASHBOARD_HTML, current_status=content, last_time=formatted_time)
 
 @app.route('/unlock', methods=['POST'])
-def unlock():
+def unlock_command():
     if 'user' not in session: return redirect(url_for('login'))
     
-    pin = request.form['pin']
-    user = session['user']
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    if pin == VALID_PIN:
-        # LOG SUCCESS
-        audit_logs.append({'time': timestamp, 'user': user, 'action': 'Remote Unlock', 'result': 'Success'})
-        print(f"[{timestamp}] UNLOCK COMMAND SENT for {user}")
-        return render_template_string(DASHBOARD_PAGE, username=user, logs=audit_logs, message="✅ Unlock Command Sent!")
+    if request.form['pin'] == SECURE_PIN:
+        print("PIN CORRECT. SENDING UNLOCK COMMAND...")
+        
+        # --- THE FIX IS HERE (Correct Headers) ---
+        payload = { "m2m:cin": { "con": "UNLOCKED" } }
+        
+        try:
+            r = requests.post(MOBIUS_BASE, headers=MOBIUS_HEADERS_POST, json=payload)
+            print("Mobius Response:", r.status_code) # DEBUG PRINT
+        except Exception as e:
+            print("Error sending to Mobius:", e)
+
+        return redirect(url_for('dashboard'))
     else:
-        # LOG FAILURE
-        audit_logs.append({'time': timestamp, 'user': user, 'action': 'Remote Unlock', 'result': 'Failed (Wrong PIN)'})
-        return render_template_string(DASHBOARD_PAGE, username=user, logs=audit_logs, message="❌ Wrong PIN!")
+        return "<h1>WRONG PIN!</h1><a href='/dashboard'>Back</a>"
 
 @app.route('/logout')
 def logout():
