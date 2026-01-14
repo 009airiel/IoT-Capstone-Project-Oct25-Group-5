@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Home V | Dashboard</title>
+    <meta http-equiv="refresh" content="35"> 
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { margin: 0; font-family: 'Inter', sans-serif; background-color: #f1f5f9; min-height: 100vh; }
+        .navbar {
+            background-color: #1e293b; padding: 1rem 2rem; display: flex;
+            justify-content: space-between; align-items: center; color: white;
+        }
+        .navbar h1 { margin: 0; font-size: 1.25rem; }
+        .logout-btn { color: #94a3b8; text-decoration: none; font-size: 0.875rem; }
+        .logout-btn:hover { color: white; }
+        .container { max-width: 600px; margin: 3rem auto; padding: 0 1rem; }
+        .status-card {
+            background: white; border-radius: 16px; padding: 2.5rem; text-align: center;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        .status-label { text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-size: 0.875rem; font-weight: 600; margin-bottom: 1rem; }
+        .status-badge {
+            display: inline-block; padding: 0.5rem 1.5rem; border-radius: 9999px;
+            font-size: 1.5rem; font-weight: 700; margin-bottom: 2rem;
+        }
+        .status-unlocked { background-color: #dcfce7; color: #166534; }
+        .status-locked { background-color: #fee2e2; color: #991b1b; }
+        .pin-input {
+            padding: 0.75rem; font-size: 1.25rem; letter-spacing: 0.2em; text-align: center;
+            border: 2px solid #e2e8f0; border-radius: 8px; width: 160px; margin-bottom: 1rem;
+        }
+        .unlock-btn {
+            background-color: #3b82f6; color: white; border: none; padding: 0.75rem 2rem;
+            font-size: 1rem; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; max-width: 200px;
+        }
+        .unlock-btn:hover { background-color: #2563eb; }
+        
+        /* Admin Table Styles */
+    .admin-logs-container {
+        margin-top: 30px;
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        width: 100%;
+        max-width: 600px; /* Matches your main card width */
+    }
+
+    .admin-logs-container h3 {
+        color: #333;
+        margin-bottom: 15px;
+        font-size: 1.2rem;
+        border-bottom: 2px solid #eee;
+        padding-bottom: 10px;
+    }
+
+    .log-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+    }
+
+    .log-table th {
+        text-align: left;
+        padding: 12px;
+        background-color: #f8f9fa;
+        color: #666;
+        border-bottom: 2px solid #ddd;
+    }
+
+    .log-table td {
+        padding: 12px;
+        border-bottom: 1px solid #eee;
+        color: #444;
+    }
+
+    .log-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    /* Badges for status */
+    .badge {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    .badge-success { background-color: #d4edda; color: #155724; }
+    .badge-secondary { background-color: #e2e3e5; color: #383d41; }
+
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Secure Home V</h1>
+        <a href="/logout" class="logout-btn">Sign Out</a>
+    </nav>
+    <div class="container">
+        <div class="status-card">
+            <div class="status-label">Current Vault Status</div>
+            {% if "UNLOCKED" in current_status %}
+                <div class="status-badge status-unlocked">UNLOCKED</div>
+            {% else %}
+                <div class="status-badge status-locked">LOCKED</div>
+            {% endif %}
+            <div style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 2rem;">Last Updated: {{ last_updated }}</div>
+            <div style="border-top: 1px solid #e2e8f0; padding-top: 2rem;">
+                <form method="POST" action="/unlock">
+                    <input type="password" name="pin" class="pin-input" placeholder="PIN" maxlength="6" required><br>
+                    <button type="submit" class="unlock-btn">Unlock Vault</button>
+                </form>
+{% if user == 'admin' %}
+    <div class="admin-logs-container">
+        <h3>🛡️ Security Access Logs</h3>
+        <div class="table-wrapper">
+            <table class="log-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Event</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.time }}</td>
+                        <td>
+                            <span class="badge {% if 'UNLOCK' in log.val %}badge-success{% else %}badge-secondary{% endif %}">
+                                {{ log.val }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="2">No logs found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>
