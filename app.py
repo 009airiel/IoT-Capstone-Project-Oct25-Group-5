@@ -24,9 +24,9 @@ MOBIUS_HEADERS_POST = {
 
 # Users Config
 USERS = {
-    # Password: admin123
+    # Password admin SHA 256
     "admin": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
-    # Password: user123
+    # Password user SHA 256
     "user": "e606e38b0d8c19b24cf0ee3808183162ea7cd63ff7912dbb22b5e803286b4446"
 }
 
